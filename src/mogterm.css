@@ -1,0 +1,48 @@
+.mogterm {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 8px;
+  border-radius: 4px;
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  outline: none;
+  cursor: text;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.mogterm-line {
+  display: block;
+}
+
+.mogterm-prompt {
+  color: #6a9955;
+}
+
+.mogterm-cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.15em;
+  vertical-align: text-bottom;
+  background: #d4d4d4;
+  color: #1e1e1e;
+}
+
+.mogterm.focused .mogterm-cursor {
+  animation: mogterm-blink 1s step-end infinite;
+}
+
+.mogterm:not(.focused) .mogterm-cursor {
+  animation: none;
+  background: transparent;
+  outline: 1px solid #d4d4d4;
+}
+
+@keyframes mogterm-blink {
+  0%, 100% { background: #d4d4d4; color: #1e1e1e; }
+  50% { background: transparent; color: #d4d4d4; }
+}
