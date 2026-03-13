@@ -1,0 +1,38 @@
+# Basic text output tests
+
+!name: Simple text output
+!size: 24 80
+!input
+Hello, World!
+!cursor: 0 13
+!line: 0 "Hello, World!"
+
+!name: Multi-line output with newlines
+!size: 24 80
+!input
+Line 1\nLine 2\nLine 3
+!cursor: 2 6
+!line: 0 "Line 1"
+!line: 1 "Line 2"
+!line: 2 "Line 3"
+
+!name: Carriage return overwrites text
+!size: 24 80
+!input
+AAAA\rBB
+!cursor: 0 2
+!line: 0 "BBAA"
+
+!name: Backspace moves cursor back
+!size: 24 80
+!input
+ABC\x08X
+!cursor: 0 3
+!line: 0 "ABX"
+
+!name: Tab advances to next tab stop
+!size: 24 80
+!input
+A\tB
+!cursor: 0 9
+!line: 0 "A       B"
