@@ -1,0 +1,70 @@
+# Cursor movement escape sequence tests
+
+!name: CUP - Cursor Position
+!size: 24 80
+!input
+\e[5;10H*
+!cursor: 4 10
+!cell: 4 9 *
+
+!name: CUU - Cursor Up
+!size: 24 80
+!input
+\e[5;5HSTART\e[2A*
+!cursor: 2 10
+!cell: 2 9 *
+
+!name: CUD - Cursor Down
+!size: 24 80
+!input
+\e[1;1HSTART\e[3B*
+!cursor: 3 6
+!cell: 3 5 *
+
+!name: CUF - Cursor Forward
+!size: 24 80
+!input
+\e[1;1HA\e[5C*
+!cursor: 0 7
+!cell: 0 6 *
+
+!name: CUB - Cursor Back
+!size: 24 80
+!input
+\e[1;10H\e[3D*
+!cursor: 0 7
+!cell: 0 6 *
+
+!name: CUU stops at top edge
+!size: 24 80
+!input
+\e[2;1H\e[100A*
+!cursor: 0 1
+!cell: 0 0 *
+
+!name: CUD stops at bottom edge
+!size: 10 80
+!input
+\e[1;1H\e[100B*
+!cursor: 9 1
+!cell: 9 0 *
+
+!name: CUF stops at right edge
+!size: 24 20
+!input
+\e[1;1H\e[100C*
+!line: 0 "                   *"
+
+!name: CUB stops at left edge
+!size: 24 80
+!input
+\e[1;5H\e[100D*
+!cursor: 0 1
+!cell: 0 0 *
+
+!name: CUP with default params goes to 1,1
+!size: 24 80
+!input
+\e[5;5Hx\e[Hy
+!cursor: 0 1
+!cell: 0 0 y

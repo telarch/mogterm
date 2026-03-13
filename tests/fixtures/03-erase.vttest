@@ -1,0 +1,50 @@
+# Erase operations (ED and EL)
+
+!name: EL 0 - Erase from cursor to end of line
+!size: 24 80
+!input
+ABCDEFGH\e[1;4H\e[K
+!cursor: 0 3
+!line: 0 "ABC"
+
+!name: EL 1 - Erase from start of line to cursor
+!size: 24 80
+!input
+ABCDEFGH\e[1;4H\e[1K
+!cursor: 0 3
+!line: 0 "    EFGH"
+
+!name: EL 2 - Erase entire line
+!size: 24 80
+!input
+ABCDEFGH\e[1;4H\e[2K
+!cursor: 0 3
+!line: 0 ""
+
+!name: ED 0 - Erase from cursor to end of screen
+!size: 5 10
+!input
+\e[1;1HLine 0\e[2;1HLine 1\e[3;1HLine 2\e[4;1HLine 3\e[2;1H\e[J
+!cursor: 1 0
+!line: 0 "Line 0"
+!line: 1 ""
+!line: 2 ""
+!line: 3 ""
+
+!name: ED 1 - Erase from start of screen to cursor
+!size: 5 10
+!input
+\e[1;1HLine 0\e[2;1HLine 1\e[3;1HLine 2\e[4;1HLine 3\e[3;3H\e[1J
+!cursor: 2 2
+!line: 0 ""
+!line: 1 ""
+!line: 2 "   e 2"
+
+!name: ED 2 - Erase entire screen
+!size: 5 10
+!input
+\e[1;1HLine 0\e[2;1HLine 1\e[3;1HLine 2\e[2J
+!cursor: 2 6
+!line: 0 ""
+!line: 1 ""
+!line: 2 ""

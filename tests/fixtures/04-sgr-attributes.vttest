@@ -1,0 +1,62 @@
+# SGR text attributes
+
+!name: Bold attribute
+!size: 24 80
+!input
+\e[1mBold\e[0m Normal
+!cursor: 0 11
+!attrs: 0 0 bold=1
+!attrs: 0 3 bold=1
+!attrs: 0 5 bold=0
+
+!name: Foreground color
+!size: 24 80
+!input
+\e[31mRed\e[0m
+!cursor: 0 3
+!attrs: 0 0 fg=1
+!attrs: 0 2 fg=1
+
+!name: Background color
+!size: 24 80
+!input
+\e[44mBlueBG\e[0m
+!cursor: 0 6
+!attrs: 0 0 bg=4
+!attrs: 0 5 bg=4
+
+!name: Combined bold and color
+!size: 24 80
+!input
+\e[1;32mBoldGreen\e[0m
+!cursor: 0 9
+!attrs: 0 0 bold=1
+!attrs: 0 0 fg=2
+
+!name: SGR reset clears all attributes
+!size: 24 80
+!input
+\e[1;4;31;42mStyled\e[0mPlain
+!cursor: 0 11
+!attrs: 0 0 bold=1
+!attrs: 0 0 underline=1
+!attrs: 0 0 fg=1
+!attrs: 0 0 bg=2
+!attrs: 0 6 bold=0
+!attrs: 0 6 underline=0
+!attrs: 0 6 fg=null
+!attrs: 0 6 bg=null
+
+!name: Bright foreground colors
+!size: 24 80
+!input
+\e[91mBrightRed\e[0m
+!cursor: 0 9
+!attrs: 0 0 fg=9
+
+!name: Extended 256-color foreground
+!size: 24 80
+!input
+\e[38;5;200mMagenta\e[0m
+!cursor: 0 7
+!attrs: 0 0 fg=200

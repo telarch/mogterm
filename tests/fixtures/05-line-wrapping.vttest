@@ -1,0 +1,26 @@
+# Line wrapping behavior
+
+!name: Text wraps at right edge
+!size: 24 10
+!input
+1234567890AB
+!cursor: 1 2
+!line: 0 "1234567890"
+!line: 1 "AB"
+
+!name: Wrap advances to next line
+!size: 24 5
+!input
+ABCDEFGH
+!cursor: 1 3
+!line: 0 "ABCDE"
+!line: 1 "FGH"
+
+!name: Wrap at bottom scrolls screen
+!size: 3 5
+!input
+\e[1;1HLine1\e[2;1HLine2\e[3;1HLine3EXTRA
+!cursor: 2 5
+!line: 0 "Line2"
+!line: 1 "Line3"
+!line: 2 "EXTRA"
