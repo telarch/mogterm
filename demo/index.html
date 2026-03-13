@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MogTerm Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #121212;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px;
+      min-height: 100vh;
+    }
+    h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+      color: #82aaff;
+    }
+    .subtitle {
+      color: #888;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    #terminal-container {
+      border: 1px solid #333;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+      width: fit-content;
+    }
+    .titlebar {
+      background: #2d2d2d;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #aaa;
+    }
+    .titlebar .dot { width: 12px; height: 12px; border-radius: 50%; }
+    .titlebar .dot.red { background: #ff5f56; }
+    .titlebar .dot.yellow { background: #ffbd2e; }
+    .titlebar .dot.green { background: #27c93f; }
+    .titlebar .title { flex: 1; text-align: center; }
+    #terminal {
+      /* sized by renderer */
+    }
+    .controls {
+      margin-top: 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button {
+      background: #2d2d2d;
+      color: #d4d4d4;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    button:hover { background: #3d3d3d; }
+    .input-area {
+      margin-top: 16px;
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      max-width: 660px;
+    }
+    textarea {
+      flex: 1;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 8px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 13px;
+      resize: vertical;
+      min-height: 60px;
+    }
+    textarea:focus, button:focus { outline: 1px solid #82aaff; }
+  </style>
+</head>
+<body>
+  <h1>MogTerm</h1>
+  <p class="subtitle">Virtual terminal emulator engine - v0 demo</p>
+
+  <div id="terminal-container">
+    <div class="titlebar">
+      <span class="dot red"></span>
+      <span class="dot yellow"></span>
+      <span class="dot green"></span>
+      <span class="title" id="term-title">MogTerm</span>
+    </div>
+    <div id="terminal"></div>
+  </div>
+
+  <div class="controls">
+    <button onclick="runDemo('colors')">Color Test</button>
+    <button onclick="runDemo('cursor')">Cursor Movement</button>
+    <button onclick="runDemo('sgr')">Text Attributes</button>
+    <button onclick="runDemo('banner')">ASCII Banner</button>
+    <button onclick="runDemo('matrix')">Matrix Rain</button>
+    <button onclick="terminal.write('\x1bc')">Clear</button>
+  </div>
+
+  <div class="input-area">
+    <textarea id="raw-input" placeholder="Type raw text or escape sequences here (use \x1b for ESC, \n for newline)..."></textarea>
+    <button onclick="feedRaw()">Feed</button>
+  </div>
+
+  <script type="module">
+    // --- Inline engine (no build step needed for demo) ---
+
+    // Types
+    function defaultAttrs() {
+      return {
+        bold: false, dim: false, italic: false, underline: false,
+        blink: false, inverse: false, hidden: false, strikethrough: false,
+        fg: -1, bg: -1,
+      };
+    }
+    function blankCell(attrs) {
+      return { char: ' ', attrs: attrs ? { ...attrs } : defaultAttrs() };
+    }
+
+    // Parser
+    const S = { Ground: 0, Escape: 1, EscInter: 2, CsiEntry: 3, CsiParam: 4, CsiInter: 5, Osc: 6 };
+    const A = { Print: 0, Execute: 1, Csi: 2, Esc: 3, Osc: 4 };
+
+    class Parser {
+      constructor() {
+        this.state = S.Ground;
+        this.params = []; this.cp = 0; this.hp = false;
+        this.inter = ''; this.oscData = '';
+      }
+      feed(data, h) {
+        for (let i = 0; i < data.length; i++) {
+          const ch = data[i], code = data.charCodeAt(i);
+          this._proc(ch, code, h);
+        }
+      }
+      _proc(ch, code, h) {
+        switch (this.state) {
+          case S.Ground:
+            if (code === 0x1b) this.state = S.Escape;
+            else if (code < 0x20 || code === 0x7f) h({ type: A.Execute, code });
+            else h({ type: A.Print, char: ch });
+            break;
+          case S.Escape:
+            if (code === 0x5b) { this.state = S.CsiEntry; this.params = []; this.cp = 0; this.hp = false; this.inter = ''; }
+            else if (code === 0x5d) { this.state = S.Osc; this.oscData = ''; }
+            else if (code >= 0x20 && code <= 0x2f) { this.inter = ch; this.state = S.EscInter; }
+            else if (code >= 0x30 && code <= 0x7e) { h({ type: A.Esc, intermediates: '', finalByte: ch }); this.state = S.Ground; }
+            else if (code !== 0x1b) this.state = S.Ground;
+            break;
+          case S.EscInter:
+            if (code >= 0x20 && code <= 0x2f) this.inter += ch;
+            else if (code >= 0x30 && code <= 0x7e) { h({ type: A.Esc, intermediates: this.inter, finalByte: ch }); this.state = S.Ground; }
+            else this.state = S.Ground;
+            break;
+          case S.CsiEntry:
+            if (code >= 0x30 && code <= 0x39) { this.cp = code - 0x30; this.hp = true; this.state = S.CsiParam; }
+            else if (code === 0x3b) { this.params.push(0); this.state = S.CsiParam; }
+            else if (code === 0x3f) { this.inter = '?'; this.state = S.CsiParam; }
+            else if (code >= 0x40 && code <= 0x7e) { h({ type: A.Csi, params: [], intermediates: this.inter, finalByte: ch }); this.state = S.Ground; }
+            else if (code === 0x1b) this.state = S.Escape;
+            else this.state = S.Ground;
+            break;
+          case S.CsiParam:
+            if (code >= 0x30 && code <= 0x39) { this.cp = this.cp * 10 + (code - 0x30); this.hp = true; }
+            else if (code === 0x3b) { this.params.push(this.hp ? this.cp : 0); this.cp = 0; this.hp = false; }
+            else if (code >= 0x40 && code <= 0x7e) { if (this.hp) this.params.push(this.cp); h({ type: A.Csi, params: this.params, intermediates: this.inter, finalByte: ch }); this.state = S.Ground; }
+            else if (code === 0x1b) this.state = S.Escape;
+            else this.state = S.Ground;
+            break;
+          case S.Osc:
+            if (code === 0x07 || code === 0x1b) { h({ type: A.Osc, data: this.oscData }); this.state = code === 0x1b ? S.Escape : S.Ground; }
+            else this.oscData += ch;
+            break;
+        }
+      }
+    }
+
+    // Terminal
+    class Terminal {
+      constructor(cols = 80, rows = 24) {
+        this.rows = rows; this.cols = cols;
+        this.scrollTop = 0; this.scrollBottom = rows - 1;
+        this.cells = this._grid();
+        this.cursor = { row: 0, col: 0, visible: true };
+        this.attrs = defaultAttrs();
+        this.modes = { autoWrap: true, alternateBuffer: false };
+        this.title = '';
+        this.parser = new Parser();
+        this.savedCursor = null; this.savedAttrs = null;
+      }
+      _grid() { return Array.from({ length: this.rows }, () => Array.from({ length: this.cols }, () => blankCell())); }
+      _row() { return Array.from({ length: this.cols }, () => blankCell()); }
+
+      write(data) { this.parser.feed(data, a => this._action(a)); }
+
+      getState() {
+        return {
+          rows: this.rows, cols: this.cols,
+          cells: this.cells.map(r => r.map(c => ({ char: c.char, attrs: { ...c.attrs } }))),
+          cursor: { ...this.cursor }, title: this.title,
+        };
+      }
+
+      _action(a) {
+        switch (a.type) {
+          case A.Print: this._print(a.char); break;
+          case A.Execute: this._exec(a.code); break;
+          case A.Csi: this._csi(a); break;
+          case A.Esc: this._esc(a.intermediates, a.finalByte); break;
+          case A.Osc: this._osc(a); break;
+        }
+      }
+
+      _print(ch) {
+        if (this.cursor.col >= this.cols) {
+          if (this.modes.autoWrap) { this.cursor.col = 0; this._lf(); }
+          else this.cursor.col = this.cols - 1;
+        }
+        this.cells[this.cursor.row][this.cursor.col] = { char: ch, attrs: { ...this.attrs } };
+        this.cursor.col++;
+      }
+
+      _exec(code) {
+        if (code === 0x08 && this.cursor.col > 0) this.cursor.col--;
+        else if (code === 0x09) this.cursor.col = Math.min(this.cols - 1, (Math.floor(this.cursor.col / 8) + 1) * 8);
+        else if (code === 0x0a || code === 0x0b || code === 0x0c) this._lf();
+        else if (code === 0x0d) this.cursor.col = 0;
+      }
+
+      _lf() {
+        if (this.cursor.row === this.scrollBottom) { this.cells.splice(this.scrollTop, 1); this.cells.splice(this.scrollBottom, 0, this._row()); }
+        else if (this.cursor.row < this.rows - 1) this.cursor.row++;
+      }
+
+      _csi(a) {
+        const p = a.params, f = a.finalByte;
+        if (a.intermediates === '?') { this._privMode(p, f); return; }
+        switch (f) {
+          case 'A': this.cursor.row = Math.max(this.scrollTop, this.cursor.row - Math.max(1, p[0] || 1)); break;
+          case 'B': this.cursor.row = Math.min(this.scrollBottom, this.cursor.row + Math.max(1, p[0] || 1)); break;
+          case 'C': this.cursor.col = Math.min(this.cols - 1, this.cursor.col + Math.max(1, p[0] || 1)); break;
+          case 'D': this.cursor.col = Math.max(0, this.cursor.col - Math.max(1, p[0] || 1)); break;
+          case 'E': this.cursor.col = 0; this.cursor.row = Math.min(this.scrollBottom, this.cursor.row + Math.max(1, p[0] || 1)); break;
+          case 'F': this.cursor.col = 0; this.cursor.row = Math.max(this.scrollTop, this.cursor.row - Math.max(1, p[0] || 1)); break;
+          case 'G': this.cursor.col = Math.min(this.cols - 1, Math.max(0, (p[0] || 1) - 1)); break;
+          case 'H': case 'f':
+            this.cursor.row = Math.min(this.rows - 1, Math.max(0, (p[0] || 1) - 1));
+            this.cursor.col = Math.min(this.cols - 1, Math.max(0, (p[1] || 1) - 1));
+            break;
+          case 'J': this._ed(p[0] || 0); break;
+          case 'K': this._el(p[0] || 0); break;
+          case 'L': { const n = Math.min(Math.max(1, p[0] || 1), this.scrollBottom - this.cursor.row + 1);
+            for (let i = 0; i < n; i++) { this.cells.splice(this.scrollBottom, 1); this.cells.splice(this.cursor.row, 0, this._row()); }
+            break; }
+          case 'M': { const n = Math.min(Math.max(1, p[0] || 1), this.scrollBottom - this.cursor.row + 1);
+            for (let i = 0; i < n; i++) { this.cells.splice(this.cursor.row, 1); this.cells.splice(this.scrollBottom, 0, this._row()); }
+            break; }
+          case 'P': { const n = Math.min(Math.max(1, p[0] || 1), this.cols - this.cursor.col);
+            const row = this.cells[this.cursor.row]; row.splice(this.cursor.col, n);
+            for (let i = 0; i < n; i++) row.push(blankCell()); break; }
+          case 'S': { const n = Math.max(1, p[0] || 1); for (let i = 0; i < n; i++) { this.cells.splice(this.scrollTop, 1); this.cells.splice(this.scrollBottom, 0, this._row()); } break; }
+          case 'T': { const n = Math.max(1, p[0] || 1); for (let i = 0; i < n; i++) { this.cells.splice(this.scrollBottom, 1); this.cells.splice(this.scrollTop, 0, this._row()); } break; }
+          case 'd': this.cursor.row = Math.min(this.rows - 1, Math.max(0, (p[0] || 1) - 1)); break;
+          case 'm': this._sgr(p); break;
+          case 'r':
+            this.scrollTop = Math.max(0, (p[0] || 1) - 1);
+            this.scrollBottom = Math.min(this.rows - 1, (p[1] || this.rows) - 1);
+            this.cursor.row = 0; this.cursor.col = 0; break;
+        }
+      }
+
+      _privMode(p, f) {
+        const set = f === 'h';
+        if (f !== 'h' && f !== 'l') return;
+        for (const v of p) {
+          if (v === 7) this.modes.autoWrap = set;
+          else if (v === 25) this.cursor.visible = set;
+          else if (v === 1049) {
+            if (set && !this.modes.alternateBuffer) {
+              this._altCells = this.cells; this._altCursor = { ...this.cursor };
+              this.cells = this._grid(); this.cursor = { row: 0, col: 0, visible: this.cursor.visible };
+              this.modes.alternateBuffer = true;
+            } else if (!set && this.modes.alternateBuffer) {
+              if (this._altCells) this.cells = this._altCells;
+              if (this._altCursor) this.cursor = this._altCursor;
+              this.modes.alternateBuffer = false;
+            }
+          }
+        }
+      }
+
+      _sgr(p) {
+        if (p.length === 0) { this.attrs = defaultAttrs(); return; }
+        let i = 0;
+        while (i < p.length) {
+          const v = p[i];
+          if (v === 0) this.attrs = defaultAttrs();
+          else if (v === 1) this.attrs.bold = true;
+          else if (v === 2) this.attrs.dim = true;
+          else if (v === 3) this.attrs.italic = true;
+          else if (v === 4) this.attrs.underline = true;
+          else if (v === 5) this.attrs.blink = true;
+          else if (v === 7) this.attrs.inverse = true;
+          else if (v === 8) this.attrs.hidden = true;
+          else if (v === 9) this.attrs.strikethrough = true;
+          else if (v === 22) { this.attrs.bold = false; this.attrs.dim = false; }
+          else if (v === 23) this.attrs.italic = false;
+          else if (v === 24) this.attrs.underline = false;
+          else if (v === 25) this.attrs.blink = false;
+          else if (v === 27) this.attrs.inverse = false;
+          else if (v === 28) this.attrs.hidden = false;
+          else if (v === 29) this.attrs.strikethrough = false;
+          else if (v >= 30 && v <= 37) this.attrs.fg = v - 30;
+          else if (v === 38 && p[i+1] === 5 && i+2 < p.length) { this.attrs.fg = p[i+2]; i += 2; }
+          else if (v === 39) this.attrs.fg = -1;
+          else if (v >= 40 && v <= 47) this.attrs.bg = v - 40;
+          else if (v === 48 && p[i+1] === 5 && i+2 < p.length) { this.attrs.bg = p[i+2]; i += 2; }
+          else if (v === 49) this.attrs.bg = -1;
+          else if (v >= 90 && v <= 97) this.attrs.fg = v - 90 + 8;
+          else if (v >= 100 && v <= 107) this.attrs.bg = v - 100 + 8;
+          i++;
+        }
+      }
+
+      _esc(inter, fb) {
+        if (inter === '') {
+          if (fb === '7') { this.savedCursor = { ...this.cursor }; this.savedAttrs = { ...this.attrs }; }
+          else if (fb === '8') { if (this.savedCursor) this.cursor = { ...this.savedCursor }; if (this.savedAttrs) this.attrs = { ...this.savedAttrs }; }
+          else if (fb === 'D') this._lf();
+          else if (fb === 'E') { this.cursor.col = 0; this._lf(); }
+          else if (fb === 'M') { if (this.cursor.row === this.scrollTop) { this.cells.splice(this.scrollBottom, 1); this.cells.splice(this.scrollTop, 0, this._row()); } else if (this.cursor.row > 0) this.cursor.row--; }
+          else if (fb === 'c') { this.cells = this._grid(); this.cursor = { row: 0, col: 0, visible: true }; this.attrs = defaultAttrs(); this.scrollTop = 0; this.scrollBottom = this.rows - 1; this.title = ''; }
+        }
+      }
+
+      _osc(a) {
+        const si = a.data.indexOf(';');
+        if (si === -1) return;
+        const ps = parseInt(a.data.substring(0, si), 10);
+        if (ps === 0 || ps === 2) this.title = a.data.substring(si + 1);
+      }
+
+      _ed(mode) {
+        if (mode === 0) { this._el(0); for (let r = this.cursor.row + 1; r < this.rows; r++) this.cells[r] = this._row(); }
+        else if (mode === 1) { for (let r = 0; r < this.cursor.row; r++) this.cells[r] = this._row(); for (let c = 0; c <= this.cursor.col; c++) this.cells[this.cursor.row][c] = blankCell(); }
+        else if (mode === 2 || mode === 3) this.cells = this._grid();
+      }
+
+      _el(mode) {
+        const row = this.cells[this.cursor.row];
+        if (mode === 0) { for (let c = this.cursor.col; c < this.cols; c++) row[c] = blankCell(); }
+        else if (mode === 1) { for (let c = 0; c <= this.cursor.col; c++) row[c] = blankCell(); }
+        else if (mode === 2) { for (let c = 0; c < this.cols; c++) row[c] = blankCell(); }
+      }
+    }
+
+    // Renderer
+    const ANSI_COLORS = [
+      '#000000','#cc0000','#4e9a06','#c4a000','#3465a4','#75507b','#06989a','#d3d7cf',
+      '#555753','#ef2929','#8ae234','#fce94f','#729fcf','#ad7fa8','#34e2e2','#eeeeec',
+    ];
+    function colorCSS(i) {
+      if (i < 0) return '';
+      if (i < 16) return ANSI_COLORS[i];
+      if (i < 232) { const n = i-16; return `rgb(${Math.floor(n/36)*51},${(Math.floor(n/6)%6)*51},${(n%6)*51})`; }
+      const l = (i-232)*10+8; return `rgb(${l},${l},${l})`;
+    }
+    function styleFor(a, inv) {
+      const p = [];
+      let fg = a.fg, bg = a.bg;
+      if (a.bold && fg >= 0 && fg < 8) fg += 8;
+      if (inv || a.inverse) { [fg, bg] = [bg, fg]; }
+      if (fg >= 0) p.push(`color:${colorCSS(fg)}`);
+      if (bg >= 0) p.push(`background-color:${colorCSS(bg)}`);
+      if (a.bold) p.push('font-weight:bold');
+      if (a.dim) p.push('opacity:0.5');
+      if (a.italic) p.push('font-style:italic');
+      if (a.underline) p.push('text-decoration:underline');
+      if (a.strikethrough) p.push(a.underline ? 'text-decoration:underline line-through' : 'text-decoration:line-through');
+      if (a.hidden) p.push('visibility:hidden');
+      return p.join(';');
+    }
+    function esc(c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c; }
+
+    class Renderer {
+      constructor(el) {
+        this.el = el;
+        el.style.backgroundColor = '#1e1e1e';
+        el.style.padding = '8px';
+        this.pre = document.createElement('pre');
+        this.pre.style.margin = '0';
+        this.pre.style.fontFamily = "'Cascadia Code','Fira Code','Consolas','Courier New',monospace";
+        this.pre.style.fontSize = '14px';
+        this.pre.style.lineHeight = '1.2';
+        this.pre.style.color = '#d4d4d4';
+        el.appendChild(this.pre);
+      }
+      render(state) {
+        const lines = [];
+        for (let r = 0; r < state.rows; r++) {
+          const spans = [];
+          let c = 0;
+          while (c < state.cols) {
+            const cell = state.cells[r][c];
+            const isCur = state.cursor.visible && r === state.cursor.row && c === state.cursor.col;
+            const st = styleFor(cell.attrs, isCur);
+            let text = esc(cell.char);
+            let next = c + 1;
+            while (next < state.cols) {
+              const nc = state.cells[r][next];
+              const ni = state.cursor.visible && r === state.cursor.row && next === state.cursor.col;
+              if (styleFor(nc.attrs, ni) !== st) break;
+              text += esc(nc.char);
+              next++;
+            }
+            spans.push(st ? `<span style="${st}">${text}</span>` : text);
+            c = next;
+          }
+          lines.push(spans.join(''));
+        }
+        this.pre.innerHTML = lines.join('\n');
+      }
+    }
+
+    // --- Setup ---
+    const terminal = new Terminal(80, 24);
+    const renderer = new Renderer(document.getElementById('terminal'));
+
+    function render() {
+      const state = terminal.getState();
+      renderer.render(state);
+      document.getElementById('term-title').textContent = state.title || 'MogTerm';
+    }
+
+    // Expose for buttons
+    window.terminal = terminal;
+    window.render = render;
+
+    // Demo sequences
+    const ESC = '\x1b';
+    const CSI = ESC + '[';
+
+    const demos = {
+      colors() {
+        terminal.write(CSI + '2J' + CSI + 'H'); // clear + home
+        terminal.write(CSI + '1mANSI Color Test' + CSI + '0m\r\n\r\n');
+
+        // Standard colors
+        terminal.write('Standard colors:\r\n');
+        for (let i = 0; i < 8; i++) terminal.write(CSI + (40 + i) + 'm  ' + CSI + '0m');
+        terminal.write('\r\n');
+        for (let i = 0; i < 8; i++) terminal.write(CSI + (100 + i) + 'm  ' + CSI + '0m');
+        terminal.write('\r\n\r\n');
+
+        // 256 color palette
+        terminal.write('256-color palette:\r\n');
+        for (let i = 0; i < 16; i++) {
+          for (let j = 0; j < 16; j++) {
+            const c = i * 16 + j;
+            terminal.write(CSI + '48;5;' + c + 'm  ' + CSI + '0m');
+          }
+          terminal.write('\r\n');
+        }
+
+        // Foreground text colors
+        terminal.write('\r\nColored text: ');
+        const names = ['Black','Red','Green','Yellow','Blue','Magenta','Cyan','White'];
+        for (let i = 0; i < 8; i++) {
+          terminal.write(CSI + (30 + i) + 'm' + names[i] + ' ' + CSI + '0m');
+        }
+        terminal.write('\r\n');
+      },
+
+      cursor() {
+        terminal.write(CSI + '2J' + CSI + 'H');
+        terminal.write('Cursor movement demo:\r\n\r\n');
+
+        // Draw a box using cursor movement
+        const w = 40, h = 10;
+        // Top border
+        terminal.write(CSI + '36m'); // cyan
+        terminal.write('+' + '-'.repeat(w - 2) + '+\r\n');
+        for (let i = 0; i < h - 2; i++) {
+          terminal.write('|' + ' '.repeat(w - 2) + '|\r\n');
+        }
+        terminal.write('+' + '-'.repeat(w - 2) + '+');
+
+        // Move cursor to center and write text
+        const centerRow = Math.floor(h / 2) + 3;
+        const centerCol = Math.floor(w / 2) - 6;
+        terminal.write(CSI + centerRow + ';' + centerCol + 'H');
+        terminal.write(CSI + '1;33mHello MogTerm!' + CSI + '0m');
+
+        // Position info
+        terminal.write(CSI + (h + 4) + ';1H');
+        terminal.write(CSI + '0mCursor positioned at row ' + centerRow + ', col ' + centerCol);
+        terminal.write('\r\n');
+      },
+
+      sgr() {
+        terminal.write(CSI + '2J' + CSI + 'H');
+        terminal.write(CSI + '1mText Attribute Demo' + CSI + '0m\r\n\r\n');
+
+        terminal.write(CSI + '1mBold text' + CSI + '0m\r\n');
+        terminal.write(CSI + '2mDim text' + CSI + '0m\r\n');
+        terminal.write(CSI + '3mItalic text' + CSI + '0m\r\n');
+        terminal.write(CSI + '4mUnderlined text' + CSI + '0m\r\n');
+        terminal.write(CSI + '7mInverse text' + CSI + '0m\r\n');
+        terminal.write(CSI + '9mStrikethrough text' + CSI + '0m\r\n');
+        terminal.write(CSI + '1;3;4;31mBold italic underline red' + CSI + '0m\r\n');
+        terminal.write('\r\n');
+
+        // Color matrix
+        terminal.write('Foreground on backgrounds:\r\n');
+        for (let bg = 40; bg <= 47; bg++) {
+          for (let fg = 30; fg <= 37; fg++) {
+            terminal.write(CSI + fg + ';' + bg + 'm Aa ' + CSI + '0m');
+          }
+          terminal.write('\r\n');
+        }
+      },
+
+      banner() {
+        terminal.write(CSI + '2J' + CSI + 'H');
+        terminal.write(CSI + '36m'); // cyan
+        const art = [
+          ' __  __             _____                    ',
+          '|  \\/  | ___   __ |_   _|__ _ __ _ __ ___   ',
+          "| |\\/| |/ _ \\ / _` || |/ _ \\ '__| '_ ` _ \\  ",
+          '| |  | | (_) | (_| || |  __/ |  | | | | | | ',
+          '|_|  |_|\\___/ \\__, ||_|\\___|_|  |_| |_| |_| ',
+          '              |___/                          ',
+        ];
+        for (const line of art) {
+          terminal.write(line + '\r\n');
+        }
+        terminal.write(CSI + '0m\r\n');
+        terminal.write(CSI + '33mVirtual Terminal Emulator Engine v0.1.0' + CSI + '0m\r\n\r\n');
+        terminal.write('A browser-based terminal emulator engine that\r\n');
+        terminal.write('interprets ANSI/VT100 escape sequences and\r\n');
+        terminal.write('renders terminal output in real-time.\r\n');
+      },
+
+      matrix() {
+        terminal.write(CSI + '2J' + CSI + 'H');
+        terminal.write(CSI + '?25l'); // hide cursor
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789@#$%&*';
+        const drops = Array.from({ length: 80 }, () => Math.floor(Math.random() * 24));
+
+        let frame = 0;
+        const interval = setInterval(() => {
+          for (let x = 0; x < 80; x++) {
+            const y = drops[x];
+            // Bright green for the head
+            terminal.write(CSI + (y + 1) + ';' + (x + 1) + 'H');
+            terminal.write(CSI + '1;32m' + chars[Math.floor(Math.random() * chars.length)]);
+            // Dim the trail
+            if (y > 0) {
+              terminal.write(CSI + y + ';' + (x + 1) + 'H');
+              terminal.write(CSI + '0;32m' + chars[Math.floor(Math.random() * chars.length)]);
+            }
+            if (y > 3) {
+              terminal.write(CSI + (y - 3) + ';' + (x + 1) + 'H');
+              terminal.write(CSI + '2;32m' + chars[Math.floor(Math.random() * chars.length)]);
+            }
+            if (y > 8) {
+              terminal.write(CSI + (y - 8) + ';' + (x + 1) + 'H');
+              terminal.write(CSI + '0m ');
+            }
+            drops[x] = (drops[x] + 1) % 30;
+            if (drops[x] === 0) drops[x] = -Math.floor(Math.random() * 10);
+          }
+          render();
+          frame++;
+          if (frame > 60) {
+            clearInterval(interval);
+            terminal.write(CSI + '?25h'); // show cursor
+            terminal.write(CSI + '0m');
+          }
+        }, 50);
+      },
+    };
+
+    window.runDemo = function(name) {
+      demos[name]();
+      render();
+    };
+
+    window.feedRaw = function() {
+      const input = document.getElementById('raw-input');
+      // Parse escape sequences from text
+      const text = input.value
+        .replace(/\\x1b/g, '\x1b')
+        .replace(/\\x1B/g, '\x1b')
+        .replace(/\\e/g, '\x1b')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t');
+      terminal.write(text);
+      render();
+      input.value = '';
+    };
+
+    // Run initial banner
+    demos.banner();
+    render();
+
+    // Set title via OSC
+    terminal.write('\x1b]0;MogTerm Demo\x07');
+    render();
+  </script>
+</body>
+</html>
